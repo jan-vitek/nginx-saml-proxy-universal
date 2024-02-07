@@ -2,7 +2,7 @@ version: '3'
 services:
   saml:
     build: .
-    image: nginx-saml-proxy
+    image: nginx-saml-proxy-universal
     volumes:
       - ./app.py:/app/app.py
   nginx:
