@@ -1,3 +1,15 @@
+# Copyright 2024 Jan Vitek (mail@janvitek.com)
+#
+# Copyright 2019 UW-IT Identity & Access Management (https://github.com/UWIT-IAM)
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
+#
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# This file has been modified by Jan Vitek to add support for a custom Saml Identity Provider configuration.
+
 from flask import Flask, Response, request, session, abort, redirect
 from flask.logging import default_handler
 import flask
@@ -5,6 +17,7 @@ import flask.json
 from werkzeug.exceptions import Unauthorized, Forbidden
 from werkzeug.middleware.proxy_fix import ProxyFix
 import uw_saml2
+from uw_saml2.idp import federated
 from urllib.parse import urljoin, urlparse
 from datetime import timedelta
 import os
@@ -85,14 +98,20 @@ def status(group=None):
 
 def _saml_args():
     """Get entity_id and acs_url from request.headers."""
-    entity_id = request.url_root[:-1]  # remove trailing slash
-    acs_url = urljoin(request.url_root, POSTBACK_ROUTE[1:])
+    args = dict()
+    args['entity_id'] = request.url_root[:-1]  # remove trailing slash
+    args['acs_url'] = urljoin(request.url_root, POSTBACK_ROUTE[1:])
     if 'X-Saml-Entity-Id' in request.headers:
-        entity_id = request.headers['X-Saml-Entity-Id']
+        args['entity_id'] = request.headers['X-Saml-Entity-Id']
     if 'X-Saml-Acs' in request.headers:
-        acs_url = urljoin(request.url_root, request.headers['X-Saml-Acs'])
-    return dict(entity_id=entity_id, acs_url=acs_url)
-
+        args['acs_url'] = urljoin(request.url_root, request.headers['X-Saml-Acs'])
+    if 'x-Saml-Idp' in request.headers:
+        args['idp'] = federated.SccaIdp(request.headers['X-Saml-Idp'])
+        if 'x-Saml-Idp-Url' in request.headers:
+            args['idp'].sso_url = request.headers['X-Saml-Idp-Url']
+        if 'x-Saml-Idp-Cert' in request.headers:
+            args['idp'].x509_cert = request.headers['X-Saml-Idp-Cert']
+    return args
 
 @app.route('/login/')
 @app.route('/login/<path:return_to>')
@@ -146,7 +165,10 @@ def login():
     args = _saml_args()
     attributes = uw_saml2.process_response(request.form, **args)
 
-    session['userid'] = attributes['uwnetid']
+    if 'x-Saml-Idp-Id-Attr' in request.headers:
+        session['userid'] = attributes[request.headers['X-Saml-Idp-Id-Attr']]
+    else:
+        session['userid'] = attributes['uwnetid']
     session['groups'] = attributes.get('groups', [])
     session['has_2fa'] = attributes.get('two_factor')
     relay_state = request.form.get('RelayState')

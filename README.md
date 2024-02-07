@@ -1,10 +1,16 @@
 # nginx-saml-proxy
 
+This is a fork of [UWIT-IAM/nginx-saml-proxy](https://github.com/UWIT-IAM/nginx-saml-proxy) 
+which brings the ability to be configured to work with 3rd party SAML Identity providers.
+
 This docker image can be used as a standalone proxy for an nginx `auth_request`
-authentication. You supply it a UW-registered SAML Entity ID and ACS postback
+authentication. By defaultu you supply it a UW-registered SAML Entity ID and ACS postback
 URL, the proxy will take care of the rest.
 
-Example nginx.conf would look like the following...
+If you need different SAML IdP than UW, you can send your IdP info in the headers of
+SAML request.
+
+Example nginx.conf for UW IdP would look like the following...
 
 ```
 location / {
@@ -35,6 +41,35 @@ location @login_required {
 
 location @2fa_required {
     return 302 https://$http_host/saml/2fa$request_uri;
+}
+```
+
+Example nginx.conf for 3rd party IdP would look like this:
+
+```
+location / {
+    auth_request /saml/status;
+    auth_request_set $auth_user $upstream_http_x_saml_user;
+    error_page 401 = @login_required;
+    proxy_set_header Remote-User $auth_user;
+}
+
+location @login_required {
+  return 302 https://$http_host/saml/login$request_uri;
+}
+
+location /saml/ {
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Prefix /saml/;
+    proxy_set_header X-Saml-Entity-Id saml_service_id;
+    proxy_set_header X-Saml-Acs /saml/login;
+    proxy_set_header X-Saml-Idp https://example.com/saml;
+    proxy_set_header X-Saml-Idp-Url https://example.com/saml/auth;
+    proxy_set_header X-Saml-Idp-Id-Attr EmailAddress;
+    proxy_set_header X-Saml-Idp-Cert MIIFPzCCAyegAw ... zkpHmcFcgY;
+    proxy_pass http://saml:5000/;
 }
 ```
 
